@@ -1,0 +1,255 @@
+---
+title: "Analiza rozkładu ocen filmów"
+author: "Kacper Budnik, Aleksy Walczak, TBA, TBA"
+date: "2024-12-13"
+output:
+  pdf_document: 
+    toc: true
+    number_sections: true
+    extra_dependencies: ["polski", "mathtools", "amsthm", "amssymb", "icomma", "upgreek", "xfrac", "float", "hyperref", "caption", "enumitem", "animate", "scrextend", "tabularx", "titlesec","wrapfig"]
+fontsize: 12pt
+---
+
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, eval = TRUE, fig.pos = "H", dev.args=list(encoding="CP1257.enc"), fig.path='figure/', fig.align='center', fig.pos='H',fig.width=4, fig.height=3, error = FALSE)
+```
+
+```{r, echo=FALSE}
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+library(tidyverse)
+
+library(data.table)
+library(corrplot)
+
+library(knitr)
+
+library(gridExtra)
+
+library(kableExtra)
+
+#library(HDclassif)
+#library(ipred)
+#library(rpart)
+#library(rpart.plot)
+#library(klaR)
+library(mlbench)
+#library(adabag)
+library(e1071)
+library(randomForest)
+#library(arules)
+#library(MASS)
+#library(cluster)
+
+#library(summarytools)
+#library(forcats)
+
+#library(pracma)
+#library(randtests)
+library(xtable)
+
+
+#library(JuliaCall)
+#library(animation)
+
+library(maps)
+library(class)
+#library(mlbench)
+#library(ks)
+#library(randomForest)
+#library(EnvStats)
+#library(vcd)
+#library(DescTools)
+#library(ramify)
+
+#library(rpart)
+#library(smotefamily)
+library(bnlearn)
+```
+
+```{r}
+proc<-function(t){
+  (100*t) %>% round(digits=1) %>% toString %>% paste0("%")
+} 
+```
+\newpage
+\section{Wstęp}
+Celem tej analizy jest zbadanie rozkładu ocen filmów. Skupimy się głównie na dwóch składowych: średniej ocenie oraz odchyleniu standardowemu ocen. Dane zostały scrapowane z portalu \href{https://www.filmweb.pl/films/search?page=1}{Filmweb}. Pobrane zostały informacje o 10 000 filmach. Filmy zostały wybrane na podstawie wyszukiwarki portalu Filmweb z parametrem \verb|Popularne: najbardziej| w dniu 8 styczeń 2025 roku. Dane (rozbite na dwie tabele) prezentują się następująco
+```{r load}
+A=read.csv("films_detailed.csv",sep = ";", header=TRUE)
+kab1<- head(A[1:7])  %>%
+  kbl(caption="Przykładowe dane.",booktabs = TRUE) %>%
+  kable_paper(full_width = F, font_size = 12) %>%
+  kable_styling(latex_options = "HOLD_position")
+#%>% #  add_header_above(c("Dodana cecha do poprzednich"=1, "Uczący"=3, "Testowy"=3))
+kab2<- head(A[c(1,8,9)])  %>%
+  kbl(caption="Przykładowe dane.",booktabs = TRUE) %>%
+  kable_paper(full_width = F, font_size = 12) %>%
+  kable_styling(latex_options = "HOLD_position")
+  
+kab1
+kab2
+A[A=="-"] = NA
+```
+Zmienne \verb|Title|, \verb|Year|, \verb|Box.Office|, \verb|Budget|, \verb|Number.of.Reviews| są dobrze tłumaczone przez swoją nazwę. Zmienna \verb|Genre| jest zmienną odpowiadającą za gatunek filmowy, a zmienna \verb|Time..mins.| odpowiada za czas trwania filmu w minutach. Natomiast zmienna \verb|Award.Amount| może być delikatnie myląca. Zawiera ona nie tylko informacje o zdobytych nagrodach (jak Oscary, Złote Globy, Saturny, ...) ale również nominacje do nagród. Ostatnia zmienna: \verb|Reviews| zawiera wektor z informacjami o rozkładzie ocen w procentach, posortowanych rosnąco względem oceny. Zatem w pierwszym przypadku 0.6\% osób oceniało film `Zielona mila` 1 na 10, 0.2\% na 2, ..., 32\% osób oceniło 10 na 10.\newline
+
+W danych znajduje się łącznie `r sum(is.na(A))` obserwacji brakujących. W szczególności w zmiennych \verb|Box.Office| (`r sum(is.na(A$Box.Office))`) oraz \verb|Budget| (`r sum(is.na(A$Budget))`). Ponieważ brakujące dane często występują w tych samych obserwacjach (tylko `r (nrow(A) - nrow(drop_na(A))) - sum(is.na(A$Budget))` posiada budżet, a nie posiada jakiejkolwiek innej zmiennej) oraz głównym celem projektu była nauka scrapowania danych, postanowiliśmy się pozbyć tych obserwacji, otrzymując w ten sposób `r nrow(drop_na(A))` obserwacji zawierających wszystkie cechy.
+```{r}
+A<-drop_na(A)
+
+mom=matrix(0,length(A[,1]),2)
+prob=matrix(0,length(A[,1]),10)
+for(i in 1:length(A[,1])){
+  prob[i,] <- as.numeric(unlist(strsplit(gsub("\\[|\\]", "", A$Reviews[i]), ",\\s*")))
+  mom[i,1] = (1:10) %*% prob[i,] / 100
+  mom[i,2] = (1:10)^2 %*% prob[i,] / 100
+}
+
+prob<-prob/rowSums(prob)
+```
+
+```{r, results='hide'}
+#A[8] = mom[,1]
+#names(A)[8] <- "Mean"
+#A[9] = (mom[,2] - mom[,1]^2) %>% sqrt
+#names(A)[9] <- "Std"
+A=A[-8] # bez rozkłądu -- zapisana w inforamacja w prob
+names(A)[7] <- "Duration"
+sapply(A, class)
+A<-transform(A, Box.Office = as.numeric(Box.Office))
+A<-transform(A, Budget  = as.numeric(Budget ))
+A<-transform(A, Duration = as.numeric(Duration))
+A<-transform(A, Year = as.numeric(Year))
+A<-transform(A, Award.Amount = as.numeric(Award.Amount))
+A<-transform(A, Genre = as.factor(Genre))
+A<-transform(A, Number.of.Reviews = as.numeric(Number.of.Reviews))
+titl<-A$Title
+A=A[-1]
+sapply(A, class)
+```
+Dodatkowo w dalszej analizie nie korzystaliśmy ze zmiennej \verb|Title|, która jest unikatowa dla każdej obserwacji.
+\section{Analiza}
+```{r}
+set.seed(1337)
+smpl<-sample(1:nrow(A), nrow(A)/3)
+learn <- A[-smpl,]
+learn.prob <- prob[-smpl,]
+
+test <- A[smpl,]
+test.prob <- prob[smpl,]
+
+N=1000
+```
+
+```{r trees , cache=TRUE, results='hide'}
+set.seed(1337)
+trees=list()
+t=Sys.time()
+for(i in 1:N){
+  trees[[i]]<-randomForest(learn, as.factor(apply(learn.prob,1,  function(w) sample(1:10, 1, prob=w))), ntree=1, importance = T)
+}
+Sys.time()-t
+```
+
+```{r predict, cache=TRUE}
+res<-sapply(1:N,function(i) predict(trees[[i]], test), USE.NAMES = FALSE)
+rownames(res) <- NULL
+
+pes<-apply(res, 1, function(w) (table(c(1:10,as.integer(w)))-1)/N)
+
+res.learn<-sapply(1:N,function(i) predict(trees[[i]], learn), USE.NAMES = FALSE)
+rownames(res.learn) <- NULL
+pes.learn<-apply(res.learn, 1, function(w) (table(c(1:10,as.integer(w)))-1)/N)
+```
+
+```{r errors}
+e.t.s<-sapply(1:N, function(i) abs(pes[,i] - test.prob[i, ]) %>% sum) %>% mean
+e.t.m<-sapply(1:N, function(i) abs(pes[,i] - test.prob[i, ]) %>% mean) %>% mean
+e.l.s<-sapply(1:N, function(i) abs(pes.learn[,i] - learn.prob[i, ]) %>% sum) %>% mean
+e.l.m<-sapply(1:N, function(i) abs(pes.learn[,i] - learn.prob[i, ]) %>% mean) %>% mean
+
+#prob.naive <- sapply(1:10, function(i) mean(learn.prob[,i]))
+#e.t.m.n <- sapply(1:N, function(i) (prob.naive - test.prob[i, ]) %>% mean) %>% mean
+#e.l.m.n <- sapply(1:N, function(i) (prob.naive - learn.prob[i, ]) %>% mean) %>% mean
+#tmp<-sapply(1:N, function (i) trees[[i]]$importance, simplify = "array")
+#apply(sapply(1:N, function (i) trees[[i]]$importance[,'MeanDecreaseAccuracy'], simplify = "array"), 1, mean)
+
+```
+
+Analizę zaczniemy od podzielenia obserwacji na zbiór uczący i testowy w stosunku 2:1. W tej analizie zastosujemy trochę bardziej niestandardowe podejście. A mianowicie dla obserwacji ze zbioru uczącego wylosujemy ocenę odpowiadającą jej, z rozkładu ocen związanego z daną obserwacją. Dla takich danych stworzymy drzewo decyzyjne predykujące jedną ocenę w zależności od pozostałych danych. Taką predykcję powtórzymy wiele razy, każdorazowo losując inną ocenę. W ten sposób otrzymaliśmy `r N` drzew, każde zwracające jedną ocenę. Podejście to rozumiemy, że każde drzewo predykuje, jaką ocenę wystawiła by dana osoba poszczególnym filmom. Oczywiście nie jest to podejście doskonałe, ponieważ podczas losowania ocen w celu stworzenia modelu, losujemy te oceny niezależnie. W świecie rzeczywistym jednak każdy ma choćby swój ulubiony i nielubiany gatunek filmowy, ale wyniki uznaliśmy za zadowalające. W celu sprawdzenia jak sobie jak sobie poradził model
+
+$$
+err_j=\frac{1}{10}\sum\limits_{i=1}^{10} \left|\frac{n_{i,j}}{N} - p_{i,j}\right|
+$$
+gdzie
+\begin{itemize}
+\item $err_j$ -- błąd podczas predykcji rozkładu $j$-tego filmu;
+\item $N$ -- liczba drzew, w naszym przypadku $N=$`r N`;
+\item $n_{i,j}$ -- liczba drzew predykujących ocenę $i$ dla obserwacji $j$;
+\item $p_{i,j}$ -- prawdopodobieństwo z danych oznaczające, że $j$-ty film zostanie oceniony na ocenę $i$.
+\end{itemize}
+
+Zmienna ta określa z jakim średnim błędem oszacujemy rozkład danego filmu. Uśredniając teraz po wszystkich filmach otrzymaliśmy błąd na poziomie `r proc(e.l.m)` na zbiorze uczącym oraz `r proc(e.t.m)` na zbiorze testowym. W porównaniu metoda naiwna (przypisująca każdej ) Zatem uznaliśmy, że model dobrze przybliża rzeczywistość.\newline
+Ponieważ to stworzenia modelu korzystaliśmy z drzew losowych, możemy teraz w łatwy sposób sprawdzić istotność każdej z cech. W ten sposób otrzymujemy poniższy wykres.
+
+```{r, fig.cap="Wykres istotności dla poszczególnych cech."}
+tmp<-randomForest(learn, as.factor(apply(learn.prob,1,  function(w) sample(1:10, 1, prob=w))), ntree=1, importance = T)
+
+tmp$importance[,'MeanDecreaseAccuracy']<-apply(sapply(1:N, function (i) trees[[i]]$importance[,'MeanDecreaseAccuracy'], simplify = "array"), 1, mean)
+library(vip)
+vip(tmp)
+```
+Jak widzimy, największe znaczenie na rozkład 
+
+
+
+
+```{r, eval=FALSE}
+nbcl<-hc(learn[-8], score = "bic-cg", restart = 100, perturb = 10)
+#graphviz.plot(nbcl, layout = "fdp")
+mb(nbcl, node="Mean")
+
+nbcl<-hc(learn[-7], score = "bic-cg", restart = 100, perturb = 10)
+#graphviz.plot(nbcl, layout = "fdp")
+mb(nbcl, node="Std")
+
+nbcl<-tabu(learn[-7], score = "bic-cg",tabu = 100, max.tabu = 100)
+graphviz.plot(nbcl, layout = "fdp")
+mb(nbcl, node="Std")
+
+nbcl<-tabu(learn[-8], score = "bic-cg",tabu = 100, max.tabu = 100)
+graphviz.plot(nbcl, layout = "fdp")
+mb(nbcl, node="Mean")
+
+nbcl<-tabu(learn, score = "bic-cg",tabu = 100, max.tabu = 100)
+graphviz.plot(nbcl, layout = "fdp")
+mb(nbcl, node="Mean")
+
+
+model.glm<-glm(Mean/10~., data=learn[-8], family = binomial(link='logit'))
+sort(model.glm$coefficients)
+vec<-model.glm$coefficients
+
+order(abs(vec), decreasing = T)
+vec[order(abs(vec), decreasing = T)]
+nam<-names(vec[order(abs(vec), decreasing = T)])
+nam[nam]
+nam[!sapply(nam, function(txt) grepl( "Genre ",txt, fixed = TRUE))]
+
+```
+```{r, eval=FALSE}
+nbcl.trained = bn.fit(nbcl, learn)
+
+res.smart<-sapply(1:length(nam), function(i){
+  pred = predict(nbcl.trained, node = nam[i], test, method = "parents")
+  tmp<-table(pred, test[,i])
+  (tmp[1]+tmp[4])/sum(tmp)
+})
+tmp=randomForest(learn)
+apply(sapply(1:N, function (i) trees[[i]]$importance[,'MeanDecreaseAccuracy'], simplify = "array"), 1, mean)
+```

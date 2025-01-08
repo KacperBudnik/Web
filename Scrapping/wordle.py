@@ -25,10 +25,13 @@ driver.get("https://www.nytimes.com/games/wordle/index.html")
 
 driver.implicitly_wait(0.5)
 
-sleep(2)
+sleep(4)
 driver.find_element(    
         By.CSS_SELECTOR, value='button.fides-banner-button.fides-banner-button-primary.fides-reject-all-button').click() # Reject cookies
 sleep(1)
+driver.find_element(    
+        By.CSS_SELECTOR, value='.purr-blocker-card__button').click() 
+sleep(2)
 driver.find_element(    
         By.CSS_SELECTOR, value='button[data-testid="Play"]').click() # Play
 sleep(1)
